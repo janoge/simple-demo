@@ -1,0 +1,4 @@
+**/.terraform
+*.backup
+*.tfstate
+terraform/copy-secrets/terraform.exe

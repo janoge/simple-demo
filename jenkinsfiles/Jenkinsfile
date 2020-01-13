@@ -1,0 +1,120 @@
+pipeline {
+
+    environment {
+        AWS_ENVIRONMENT = "dev"
+    }
+
+    stages {
+        stage('Environment variables (playground)') {
+            when {
+                environment name: 'environment', value: 'playground'
+            }
+            steps{
+                script{
+                    env.aws_account_number = "XXX1"
+                }
+            }                
+        }   
+        stage('Environment variables (demo)') {
+            when {
+                environment name: 'environment', value: 'demo'
+            }
+            steps{
+                script{
+                    env.aws_account_number = "XXX2"
+                }
+            }                
+        }
+        stage('Environment variables (staging)') {
+            when {
+                environment name: 'environment', value: 'staging'
+            }
+            steps{
+                script{
+                    env.aws_account_number = "XXX3"
+                }
+            }                
+        }       
+        stage('Environment variables (production)') {
+            when {
+                environment name: 'environment', value: 'production'
+            }
+            steps{
+                script{
+                    env.aws_account_number = "XXX4"
+                }
+            }                
+        } 
+
+        stage('variables check (all target envs)'){
+            steps{
+                sh'''
+                aws_account_number=${aws_account_number:-"unspecified"}
+                if [ "$aws_account_number" = "unspecified" ]; then 
+                    echo "unsupported target environment"
+                    exit 1
+                fi
+                '''
+            }
+        }
+
+        stage('Prepare branch name'){
+            steps {                
+                script{                         
+                    if(env.branch_name.startsWith('origin/')){
+                        env.branch_name = env.branch_name.substring(7)
+                    }                                       
+                }
+            }
+        }
+
+        stage('Prepare credentials') {
+            steps
+            {
+                script                 
+                {
+                        echo "Using AWS account ${aws_account_number}"
+                        def awssessionJson = sh returnStdout: true, script: "aws sts assume-role --role-arn \"arn:aws:iam::XXX2:role/CrossAccountRole\" --role-session-name \"CrossAccountAccess-example\""
+                        awssession = new groovy.json.JsonSlurperClassic().parseText(awssessionJson)
+
+                        accesskey = awssession.Credentials.AccessKeyId
+                        secretaccesskey = awssession.Credentials.SecretAccessKey
+                        sessiontoken = awssession.Credentials.SessionToken
+
+                        env.AWS_ACCESS_KEY_ID="${accesskey}"
+                        env.AWS_SECRET_ACCESS_KEY="${secretaccesskey}"  
+                        env.AWS_SESSION_TOKEN="${sessiontoken}"  
+                        env.AWS_DEFAULT_REGION="eu-west-1"  
+                }
+                // Prepare Git Credentials
+                // NA - it is public for demo-example
+            }
+        } 
+        stage('copy secrets from region ') {
+            steps {
+                script{
+                    env.TF_VAR_region="${region}"
+                    env.TF_VAR_region_from="${region_from}"
+                    env.TF_VAR_aws_account_number="${aws_account_number}"
+                    env.TF_VAR_environment="${environment}"
+                }
+                sh '''#!/bin/bash
+                set xe
+                cd terraform/copy-secret-from-region
+                terraform get -update
+                terraform init -no-color
+                terraform plan -no-color
+                terraform apply -no-color -auto-approve
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh'''
+            echo "Secretmanager secrets was copied from ${region_from} to ${region}. Done"
+            '''
+        }
+    }
+}
